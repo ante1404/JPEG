@@ -1,8 +1,26 @@
 #ifndef JPEG_HEADER_H
 #define JPEG_HEADER_H
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <sys/types.h>
+
+struct JpegHeader *ReadHeder(char *filename, struct JpegHeader *Header);
+void ReadAppoMarker(FILE *file, struct JpegHeader *Header);
+void ReadComment(FILE *file, struct JpegHeader *Header);
+struct DQT *ReadQuantazationTable(FILE *file, struct JpegHeader *Header);
+struct SOF *ReadStartOfTheFrame(FILE *file, struct JpegHeader *Header);
+struct DHT *ReadHuffmanTable(FILE *file, struct JpegHeader *Header);
+struct RST *ReadRestartMarker(FILE *file, struct JpegHeader *Header);
+struct SOS *ReadStartOfScanMarker(FILE *file, struct JpegHeader *Header);
+void writeBMPHeader(FILE *file, int width, int height);
+void writeMCUToFile(int x, int y, const char *filename);
+int *MCU(struct JpegHeader *jpeg);
 
 typedef unsigned char byte;
 typedef unsigned int uint;
@@ -110,6 +128,7 @@ struct DHT
     uint symbolsData[325];     // Contains data of each symbol. index 1 and 2 contain the upper and lower nibble data respectivly. Upper nibble is number of preceaading zeros
     byte otherData[300];       // And lower nibble contains the length of coefficient in bits(the lenght of that coefficients code)
                                // For AC  table there can max be 162 symnols and DC max number of symbols is 12
+    uint numOfBytes[16];       // This will be to store the values of next 16 bytes, each byte tells us how many symboles are there of lenght of i-th n in this 16 int array
 };
 
 struct RST
@@ -134,8 +153,8 @@ struct SOS
     uint numOfComponents; // Number of color components
     uint componentID[3];
     uint **tableIDs;       // at index of i % 2 == 0 its a DC table id, otherwise its a AC for huffman table
-    uint startOfSelection; // must me 0
-    uint endOfSelection;   // must beb 63
+    uint startOfSelection; // must be 0
+    uint endOfSelection;   // must be 63
     uint upperNibbleOfSuccessiveAproximation;
     uint lowerNibbleOfSuccessiveAproximation;
 };
@@ -143,11 +162,12 @@ struct SOS
 struct JpegHeader
 {
     bool valid;
-    struct SOF *sofMarler;
+    struct SOF *sofMarker;
     struct DQT *dqtMarker[4];
     struct DHT *dhtMarker[4];
     struct RST *rstMarker[8];
     struct SOS *sosMarker[8]; // I made it to supporte more than 1 because progressive jpeg have more than 1, but Baseline will always have 1 SOS marker.
+    byte *imgBuffer;          // Used to store the rest of the image data after we read the SOS marker, so we can close the file
 };
 
 int zigZagMap[] = {
