@@ -1,22 +1,7 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <sys/types.h>
 #include "../Headers/JpegHeader.h"
-
-int ReadHeder(char *filename, struct JpegHeader *Header);
-void ReadAppoMarker(FILE *file, struct JpegHeader *Header);
-void ReadComment(FILE *file, struct JpegHeader *Header);
-struct DQT *ReadQuantazationTable(FILE *file, struct JpegHeader *Header);
-struct SOF *ReadStartOfTheFrame(FILE *file, struct JpegHeader *Header);
-struct DHT *ReadHuffmanTable(FILE *file, struct JpegHeader *Header);
-struct RST *ReadRestartMarker(FILE *file, struct JpegHeader *Header);
-struct SOS *ReadStartOfScanMarker(FILE *file, struct JpegHeader *Header);
 
 int main(int argc, const char **argv)
 {
-
     if (argc > 2)
     {
         printf("More than 2 Command Line Arguments\n");
@@ -29,12 +14,13 @@ int main(int argc, const char **argv)
     struct JpegHeader *Header = (struct JpegHeader *)calloc(1, sizeof(struct JpegHeader));
     Header->valid = true;
 
-    ReadHeder(filename, Header);
+    Header = ReadHeder(filename, Header);
+    MCU(Header);
 
     return 0;
 }
 
-int ReadHeder(char *filename, struct JpegHeader *Header)
+struct JpegHeader *ReadHeder(char *filename, struct JpegHeader *Header)
 {
 
     FILE *jpg = fopen(filename, "rb");
@@ -58,11 +44,10 @@ int ReadHeder(char *filename, struct JpegHeader *Header)
 
         fclose(jpg);
         Header->valid = false;
-        return 1;
+        return NULL;
     }
 
-    int counter = 0;
-    while (Header->valid && counter < len)
+    while (Header->valid && !feof(jpg))
     {
         first = fgetc(jpg);
         secound = fgetc(jpg);
@@ -81,7 +66,7 @@ int ReadHeder(char *filename, struct JpegHeader *Header)
         }
         else if (first == 0xFF && secound == SOF0)
         {
-            Header->sofMarler = ReadStartOfTheFrame(jpg, Header);
+            Header->sofMarker = ReadStartOfTheFrame(jpg, Header);
         }
         else if (first == 0xFF && secound == DRI)
         {
@@ -93,26 +78,24 @@ int ReadHeder(char *filename, struct JpegHeader *Header)
             int i = 0;
             int curr = ftell(jpg);
             fseek(jpg, 0, SEEK_END);
-            off_t n = ftell(jpg);
+            off_t n = ftell(jpg) - curr;
             fseek(jpg, curr, SEEK_SET);
-
-            imgBuffer = (byte *)malloc(n * sizeof(byte));
+            Header->imgBuffer = (byte *)malloc(n * sizeof(byte));
             while (i < n)
             {
-                int m = fread(&imgBuffer[i++], sizeof(byte), n, jpg);
+                int m = fread(&Header->imgBuffer[i++], sizeof(byte), 1, jpg);
             }
-            printf("%X\n", imgBuffer[n - 1]);
-            printf("%X\n", imgBuffer[n]);
+            fclose(jpg);
+            printf("%X %X\n", Header->imgBuffer[i - 2], Header->imgBuffer[i - 1]);
+            return Header;
         }
         else if (first == 0xFF && secound == DHT)
         {
             Header->dhtMarker[j++] = ReadHuffmanTable(jpg, Header);
         }
-        counter++;
     }
 
-    fclose(jpg);
-    return 0;
+    return Header;
 }
 
 void ReadAppoMarker(FILE *filename, struct JpegHeader *Header)
@@ -245,7 +228,7 @@ struct DHT *ReadHuffmanTable(FILE *file, struct JpegHeader *Header)
     byte lowerNibble = 0;
     byte tableInfo = 0;
 
-    uint numOfBytes[16] = {0}; // This will be to store the values of next 16 bytes;
+    memset(dhtMarker->numOfBytes, 0, 16);
     uint numOfSymbols = 0;     // Nummber of symbols in this marker
 
     tableInfo = fgetc(file);
@@ -258,11 +241,11 @@ struct DHT *ReadHuffmanTable(FILE *file, struct JpegHeader *Header)
     for (int i = 0; i < 16; i++)
     {
         dhtMarker->huffmanCodesLen[i] = NULL;
-        numOfBytes[i] = fgetc(file);
-        if (numOfBytes[i] != 0)
+        dhtMarker->numOfBytes[i] = fgetc(file);
+        if (dhtMarker->numOfBytes[i] != 0)
         {
-            dhtMarker->huffmanCodesLen[i] = (byte *)malloc(numOfBytes[i] * sizeof(byte));
-            numOfSymbols += numOfBytes[i];
+            dhtMarker->huffmanCodesLen[i] = (byte *)malloc(dhtMarker->numOfBytes[i] * sizeof(byte));
+            numOfSymbols += dhtMarker->numOfBytes[i];
         }
     }
 
@@ -281,9 +264,9 @@ struct DHT *ReadHuffmanTable(FILE *file, struct JpegHeader *Header)
 
     for (int i = 0; i < 16; i++)
     {
-        if (numOfBytes[i] != 0)
+        if (dhtMarker->numOfBytes[i] != 0)
         {
-            for (int j = 0; j < numOfBytes[i]; j++)
+            for (int j = 0; j < dhtMarker->numOfBytes[i]; j++)
             {
                 dhtMarker->huffmanCodesLen[i][m++] = symbols[u];
                 dhtMarker->symbolsData[k++] = upperNibble = (symbols[u] >> 4) & 0x0F;
@@ -302,20 +285,20 @@ struct DHT *ReadHuffmanTable(FILE *file, struct JpegHeader *Header)
     }
 
     printf("===================DHT========================\n");
-    printf("Number of bytes -> %d\n", numOfBytes[2]);
+    printf("Number of bytes -> %d\n", dhtMarker->numOfBytes[2]);
     printf("Hf Table type -> %d\n", dhtMarker->tableType);
     printf("Hf Table Id -> %d\n", dhtMarker->tableID);
     printf("Number of symbols -> %d\n", numOfSymbols);
 
     for (int i = 0; i < 16; i++)
     {
-        printf("%d -> :", i);
-        if (numOfBytes[i] == 0)
+        printf("%d -> :", i+1);
+        if (dhtMarker->numOfBytes[i] == 0)
         {
             printf("\n");
             continue;
         }
-        for (int j = 0; j < numOfBytes[i]; j++)
+        for (int j = 0; j < dhtMarker->numOfBytes[i]; j++)
         {
             printf("%X ", dhtMarker->huffmanCodesLen[i][j]);
         }
@@ -345,6 +328,7 @@ struct SOS *ReadStartOfScanMarker(FILE *file, struct JpegHeader *Header)
     struct SOS *sosMarker = (struct SOS *)malloc(sizeof(struct SOS));
 
     uint lengt = (fgetc(file) << 8) + fgetc(file);
+    printf("%d\n", lengt);
 
     sosMarker->numOfComponents = fgetc(file);
 
@@ -374,8 +358,8 @@ struct SOS *ReadStartOfScanMarker(FILE *file, struct JpegHeader *Header)
     printf("Number of components -> %d\n", sosMarker->numOfComponents);
     for (int i = 0; i < sosMarker->numOfComponents; i++)
     {
-        printf("Table ID(DC) -> %d\n", sosMarker->tableIDs[i][j++]);
-        printf("Table ID(AC) -> %d\n", sosMarker->tableIDs[i][j]);
+        printf("Huffman Table ID(DC) -> %d\n", sosMarker->tableIDs[i][j++]);
+        printf("Huffman Table ID(AC) -> %d\n", sosMarker->tableIDs[i][j]);
         j = 0;
     }
     printf("Start of Selection -> %d\n", sosMarker->startOfSelection);
@@ -384,4 +368,112 @@ struct SOS *ReadStartOfScanMarker(FILE *file, struct JpegHeader *Header)
     printf("Sucessive Aproximation -> %d\n", sosMarker->lowerNibbleOfSuccessiveAproximation);
 
     return sosMarker;
+}
+
+void writeBMPHeader(FILE *file, int width, int height)
+{
+    // BMP File Header
+    uint16_t fileType = 0x4D42;                  // "BM"
+    uint32_t fileSize = width * height * 3 + 54; // Size of image data + BMP header size
+    uint32_t reserved = 0;
+    uint32_t offset = 54; // Offset to the image data
+
+    fwrite(&fileType, sizeof(uint16_t), 1, file);
+    fwrite(&fileSize, sizeof(uint32_t), 1, file);
+    fwrite(&reserved, sizeof(uint32_t), 1, file);
+    fwrite(&offset, sizeof(uint32_t), 1, file);
+
+    // BMP Info Header
+    uint32_t headerSize = 40;                // Size of the info header
+    uint32_t imageSize = width * height * 3; // Size of the image data
+    uint16_t planes = 1;
+    uint16_t bitDepth = 24;       // 24 bits per pixel, assuming RGB color space
+    uint32_t compression = 0;     // No compression
+    uint32_t imageSizeRaw = 0;    // Not used if compression is 0
+    uint32_t xResolution = 5905;  // Pixels per meter (default: 72 dpi)
+    uint32_t yResolution = 5905;  // Pixels per meter (default: 72 dpi)
+    uint32_t colorsUsed = 0;      // All colors are used
+    uint32_t importantColors = 0; // All colors are important
+
+    fwrite(&headerSize, sizeof(uint32_t), 1, file);
+    fwrite(&width, sizeof(uint32_t), 1, file);
+    fwrite(&height, sizeof(uint32_t), 1, file);
+    fwrite(&planes, sizeof(uint16_t), 1, file);
+    fwrite(&bitDepth, sizeof(uint16_t), 1, file);
+    fwrite(&compression, sizeof(uint32_t), 1, file);
+    fwrite(&imageSize, sizeof(uint32_t), 1, file);
+    fwrite(&xResolution, sizeof(uint32_t), 1, file);
+    fwrite(&yResolution, sizeof(uint32_t), 1, file);
+    fwrite(&colorsUsed, sizeof(uint32_t), 1, file);
+    fwrite(&importantColors, sizeof(uint32_t), 1, file);
+
+    // Additional fields in the BMP Info Header
+    uint32_t redMask = 0x00FF0000;         // Red channel mask
+    uint32_t greenMask = 0x0000FF00;       // Green channel mask
+    uint32_t blueMask = 0x000000FF;        // Blue channel mask
+    uint32_t alphaMask = 0xFF000000;       // Alpha channel mask
+    uint32_t colorSpaceType = 0x73524742;  // "sRGB" color space
+    uint32_t colorSpaceEndpoints[9] = {0}; // Set color space endpoints if applicable
+
+    fwrite(&redMask, sizeof(uint32_t), 1, file);
+    fwrite(&greenMask, sizeof(uint32_t), 1, file);
+    fwrite(&blueMask, sizeof(uint32_t), 1, file);
+    fwrite(&alphaMask, sizeof(uint32_t), 1, file);
+    fwrite(&colorSpaceType, sizeof(uint32_t), 1, file);
+    fwrite(&colorSpaceEndpoints, sizeof(uint32_t), 9, file);
+}
+
+int *MCU(struct JpegHeader *jpeg)
+{
+
+    int NumOfMcuY = ceil(jpeg->sofMarker->width / 8.0);
+
+    int y = ceil(jpeg->sofMarker->width / 8.0);
+    int x = ceil(jpeg->sofMarker->height / 8.0);
+
+    printf("(%d, %d)\n", x, y);
+    printf("(%d, %d)\n", jpeg->sofMarker->height, jpeg->sofMarker->height);
+
+    int ***MCU = (int ***)malloc((x * y) * sizeof(int **));
+
+    for (int i = 0; i < x * y; i++)
+    {
+        MCU[i] = (int **)malloc(8 * sizeof(int *));
+        for (int j = 0; j < 8; j++)
+        {
+            MCU[i][j] = (int *)malloc(8 * sizeof(int));
+        }
+    }
+
+    int mx = 0; //MCU coordiantes
+    int my = 0;
+
+    for (int i = 0; i < jpeg->sofMarker->height; i++)
+    {
+        for (int j = 0; j < jpeg->sofMarker->width; j++)
+        {
+            int x = i / 8; // MCU coordinates.
+            int y = j / 8;
+            int k = x * NumOfMcuY + y; // MCU index
+            if (i < 8)
+            {
+                my = i;
+            }
+            else
+            {
+                my = i % 8;
+            }
+            if (j < 8)
+            {
+                mx = j;
+            }
+            else
+            {
+                mx = j % 8;
+            }
+            //printf("%d: %d, %d\n", k, my, mx);
+        }
+    }
+
+    return 0;
 }
